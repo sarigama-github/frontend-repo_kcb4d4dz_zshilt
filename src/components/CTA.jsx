@@ -28,8 +28,10 @@ function CTA() {
   const [eta, setEta] = useState(null)
   const [loadingEta, setLoadingEta] = useState(false)
   const [placing, setPlacing] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState('card') // 'card' | 'bank_transfer'
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
+  const [bankDetails, setBankDetails] = useState(null)
 
   const unitPrice = useMemo(() => fruits.find(f => f.name === fruit)?.price || 0, [fruit])
   const subtotal = useMemo(() => unitPrice * (quantity || 0), [unitPrice, quantity])
@@ -61,6 +63,7 @@ function CTA() {
     e.preventDefault()
     setError('')
     setSuccessMsg('')
+    setBankDetails(null)
 
     if (!eta) {
       await fetchEta()
@@ -87,18 +90,32 @@ function CTA() {
       }
       const { order_id } = await res.json()
 
-      // Init payment
+      // Init payment — supports card or bank transfer
       const payRes = await fetch(`${BASE_URL}/payments/init`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id })
+        body: JSON.stringify({ order_id, payment_method: paymentMethod })
       })
       if (!payRes.ok) throw new Error('Payment init failed')
       const payData = await payRes.json()
 
-      // Open checkout
-      window.open(payData.authorization_url, '_blank', 'noopener,noreferrer')
-      setSuccessMsg('Order created. Redirecting to secure payment...')
+      if (payData.payment_method === 'card') {
+        if (!payData.authorization_url) throw new Error('No checkout URL returned')
+        window.open(payData.authorization_url, '_blank', 'noopener,noreferrer')
+        setSuccessMsg('Order created. Redirecting to secure card checkout...')
+      } else if (payData.payment_method === 'bank_transfer') {
+        setBankDetails({
+          reference: payData.reference,
+          account_number: payData.account_number,
+          account_name: payData.account_name,
+          bank_name: payData.bank_name,
+          mode: payData.mode,
+          instructions: payData.instructions,
+        })
+        setSuccessMsg('Order created. Complete payment via bank transfer using the details below.')
+      } else {
+        setError('Unsupported payment method response')
+      }
     } catch (e) {
       setError(e.message || 'Something went wrong')
     } finally {
@@ -158,6 +175,21 @@ function CTA() {
                     </div>
                   )}
                 </div>
+
+                <div className="sm:col-span-2">
+                  <p className="mb-2 text-sm text-slate-300">Payment Method</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer ${paymentMethod==='card' ? 'border-emerald-400 bg-emerald-500/10' : 'border-emerald-500/30 bg-slate-900/80'}`}>
+                      <input type="radio" name="pay" value="card" checked={paymentMethod==='card'} onChange={()=>setPaymentMethod('card')} />
+                      <span className="text-slate-200">Card</span>
+                    </label>
+                    <label className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer ${paymentMethod==='bank_transfer' ? 'border-emerald-400 bg-emerald-500/10' : 'border-emerald-500/30 bg-slate-900/80'}`}>
+                      <input type="radio" name="pay" value="bank_transfer" checked={paymentMethod==='bank_transfer'} onChange={()=>setPaymentMethod('bank_transfer')} />
+                      <span className="text-slate-200">Bank transfer</span>
+                    </label>
+                  </div>
+                </div>
+
                 <div className="sm:col-span-2">
                   <div className="rounded-xl border border-emerald-500/20 bg-slate-900/60 p-4 text-sm text-slate-200">
                     <div className="flex items-center justify-between"><span>Subtotal</span><span className="font-semibold text-white"><Naira amount={subtotal} /></span></div>
@@ -180,6 +212,33 @@ function CTA() {
               {successMsg && (
                 <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">
                   {successMsg}
+                </div>
+              )}
+
+              {bankDetails && (
+                <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-slate-900/80 p-4 text-slate-200">
+                  <p className="text-emerald-300 mb-2">Bank transfer details</p>
+                  <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-xl border border-emerald-500/20 p-3">
+                      <p className="text-slate-400">Account number</p>
+                      <p className="text-white text-lg font-semibold">{bankDetails.account_number}</p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-500/20 p-3">
+                      <p className="text-slate-400">Account name</p>
+                      <p className="text-white text-lg font-semibold">{bankDetails.account_name}</p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-500/20 p-3">
+                      <p className="text-slate-400">Bank</p>
+                      <p className="text-white text-lg font-semibold">{bankDetails.bank_name}</p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-500/20 p-3">
+                      <p className="text-slate-400">Reference</p>
+                      <p className="text-white text-lg font-semibold">{bankDetails.reference}</p>
+                    </div>
+                  </div>
+                  {bankDetails.instructions && (
+                    <p className="mt-3 text-sm text-slate-300">{bankDetails.instructions}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -210,7 +269,7 @@ function CTA() {
                   </div>
                 </div>
                 <div className="mt-6 rounded-xl border border-emerald-500/20 bg-slate-900/80 p-4">
-                  <p className="text-slate-300 text-sm">You will be redirected to a secure checkout to complete payment. In demo mode, a simulated checkout opens.</p>
+                  <p className="text-slate-300 text-sm">Card payments open a secure checkout. For bank transfers, use the provided account details and include your reference in the narration.</p>
                 </div>
               </div>
             </div>
